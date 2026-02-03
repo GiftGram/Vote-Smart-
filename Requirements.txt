@@ -3,3 +3,5 @@ gunicorn
 requests
 pandas
 beautifulsoup4
+fecfile          # For processing FEC filings
+google-api-python-client # To link the Google Civic API
