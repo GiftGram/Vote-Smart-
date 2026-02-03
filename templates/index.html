@@ -3,29 +3,66 @@
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="referrer" content="no-referrer">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <style>
         body { font-family: sans-serif; background: #f4f4f4; padding: 20px; }
         .card { background: white; border-radius: 10px; padding: 15px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
         .photo { width: 100px; height: 100px; border-radius: 50%; object-fit: cover; }
         .score { font-weight: bold; font-size: 1.2em; color: #2c3e50; }
         .btn { display: block; background: #007bff; color: white; text-align: center; padding: 10px; border-radius: 5px; text-decoration: none; margin-top: 10px; }
+        .green-border { border: 2px solid green; }
+        .red-border { border: 2px solid red; }
+        .yellow-border { border: 2px solid orange; }
+        .flag-green { color: green; }
+        .flag-red { color: red; }
+        .recommended { background-color: #d4edda; border: 1px solid #c3e6cb; }
     </style>
 </head>
 <body>
-    <h2>Sovereign Voter Audit</h2>
-    <form method="POST">
-        <input type="text" name="address" placeholder="Enter Street Address" style="width:80%; padding:10px;">
-        <button type="submit">Search</button>
-    </form>
-
-    {% for c in candidates %}
-    <div class="card">
-        <img src="{{ c.photo }}" class="photo">
-        <h3>{{ c.name }}</h3>
-        <p>{{ c.office }}</p>
-        <div class="score">Humanity Score: {{ c.score }}/100</div>
-        <a href="{{ c.evidence }}" class="btn">View Forensic Proof</a>
+    <div class="container">
+        <h2>Sovereign Vote: Humanity-Aligned Ballot</h2>
+        <form method="POST" class="mb-4">
+            <div class="input-group">
+                <input type="text" name="address" placeholder="Enter Street Address" class="form-control">
+                <button type="submit" class="btn btn-primary">Generate Ballot</button>
+            </div>
+        </form>
+        {% if error %}
+            <p class="text-danger">{{ error }}</p>
+        {% endif %}
+        {% for office, data in contests.items() %}
+        <h3>{{ office }}</h3>
+        <div class="row">
+            {% for c in data.candidates %}
+            <div class="col-md-4 mb-3">
+                <div class="card {% if c.category == 'Sovereign' %}green-border{% elif c.category == 'Globalist' %}red-border{% else %}yellow-border{% endif %} {% if c.is_best %}recommended{% endif %}">
+                    <img src="{{ c.photo }}" class="photo mx-auto d-block">
+                    <h3 class="text-center">{{ c.name }} ({{ c.party }})</h3>
+                    {% if c.is_best %}<p class="text-center text-success"><strong>Recommended for Humanity</strong></p>{% endif %}
+                    <p class="text-center">{{ c.recommendation }}</p>
+                    <div class="score text-center">Sovereignty Score: {{ c.score }}/100 ({{ c.category }})</div>
+                    {% if c.smoke_screen %}
+                    <p class="text-center text-danger"><strong>Smoke Screen Alert:</strong> {{ c.smoke_screen }}</p>
+                    {% endif %}
+                    <ul>
+                        {% for f in c.flags %}
+                        <li class="{% if f.type == 'green' %}flag-green{% else %}flag-red{% endif %}">{{ f.text }}</li>
+                        {% endfor %}
+                    </ul>
+                    <a href="{{ c.evidence }}" class="btn">View Forensic Proof / Deep Dive</a>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        <h4>Real-Time Polls & News</h4>
+        <ul>
+            {% for item in data.real_time %}
+            <li><a href="{{ item.url }}" target="_blank">{{ item.title }}</a></li>
+            {% else %}
+            <li>No recent data available.</li>
+            {% endfor %}
+        </ul>
+        {% endfor %}
     </div>
-    {% endfor %}
 </body>
 </html>
