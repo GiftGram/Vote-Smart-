@@ -1,0 +1,85 @@
+import json
+import requests  # pip install requests
+from datetime import datetime
+
+class SovereignVoteApp:
+    def __init__(self, google_api_key, fec_api_key):
+        self.google_key = google_api_key
+        self.fec_key = fec_api_key
+        # Internal Weighting (Defending against Project Z & 2030)
+        self.weights = {"privacy": 0.40, "ethics": 0.30, "autonomy": 0.30}
+
+    def get_candidates_by_address(self, address):
+        """
+        Fetches every candidate (Local to Federal) using Google Civic API.
+        This provides the dropdown data, pictures, and office info.
+        """
+        url = f"https://www.googleapis.com/civicinfo/v2/voterinfo?key={self.google_key}&address={address}"
+        response = requests.get(url).json()
+        
+        candidates_list = []
+        if 'contests' in response:
+            for contest in response['contests']:
+                if 'candidates' in contest:
+                    for c in contest['candidates']:
+                        candidates_list.append({
+                            "name": c['name'],
+                            "office": contest['office'],
+                            "party": c.get('party', 'N/A'),
+                            "photo_url": c.get('photoUrl', 'https://via.placeholder.com/150'),
+                            "channels": c.get('channels', []) # Social media links
+                        })
+        return candidates_list
+
+    def run_forensic_audit(self, candidate_name):
+        """
+        The Forensic Decoder: Audits for Red Flags & Project Z compliance.
+        In a real app, this would scrape LegiScan and OpenFEC.
+        """
+        audit_report = {
+            "score": 100,
+            "citations": [],
+            "red_flags": []
+        }
+
+        # EXAMPLE AUDIT LOGIC (Replace with real scraper hooks)
+        # Red Flag: Funding from WEF-aligned corporate PACs
+        audit_report["score"] -= 25
+        audit_report["citations"].append("SOURCE: OpenFEC 2026 - Received $15k from Globalist-aligned Tech PAC.")
+        
+        # Red Flag: Voted for Florida SB 480 (Digital ID Infrastructure)
+        audit_report["score"] -= 30
+        audit_report["citations"].append("SOURCE: LegiScan 2026 - Voted YES on SB 480 (Digital Infrastructure Centralization).")
+
+        # Criminal/Archive Check
+        audit_report["citations"].append("SOURCE: 2026 DOJ Archive - No direct legacy record found.")
+        
+        return audit_report
+
+    def display_voter_guide(self, address):
+        """
+        The Monolithic Output: Picture, Rating, and Info.
+        """
+        print(f"\n--- SOVEREIGN VOTE GUIDE FOR: {address} ---\n")
+        candidates = self.get_candidates_by_address(address)
+        
+        for c in candidates:
+            audit = self.run_forensic_audit(c['name'])
+            rating = "SOVEREIGN" if audit['score'] > 80 else "COMPLIANCE RISK"
+            
+            print(f"[{c['name']}] - {c['office']}")
+            print(f"IMAGE: {c['photo_url']}")
+            print(f"HUMANITY RATING: {audit['score']}% ({rating})")
+            print(f"PARTY: {c['party']}")
+            print("--- EVIDENCE TRAIL ---")
+            for cite in audit['citations']:
+                print(f"  [!] {cite}")
+            print("-" * 40)
+
+# --- EXECUTION ---
+# Insert your API keys here
+app = SovereignVoteApp(google_api_key="YOUR_KEY", fec_api_key="YOUR_KEY")
+
+# Users can enter any address in any state
+user_address = "15861 Turnbridge Ct, Fort Myers, FL 33908"
+app.display_voter_guide(user_address)
