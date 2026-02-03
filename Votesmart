@@ -1,67 +1,312 @@
 import os
 import requests
-from flask import Flask, render_template, request, jsonify
+import urllib.parse
+from bs4 import BeautifulSoup
+from flask import Flask, render_template, request
 
 app = Flask(__name__)
 
-# --- SECURE KEYS (Set these in Render) ---
+# --- SECURE KEYS (Set these in environment variables, e.g., in Render or .env) ---
 GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
 FEC_API_KEY = os.environ.get('FEC_API_KEY')
+COURT_LISTENER_API_KEY = os.environ.get('COURT_LISTENER_API_KEY')  # Register at https://www.courtlistener.com/api/
+NEWS_API_KEY = os.environ.get('NEWS_API_KEY')  # From newsapi.org
 
-# --- 1. THE HUMANITY SCORE (SOVEREIGNTY AUDIT) ---
-def get_trust_rating(name, candidate_id):
-    """Calculates an objective score based on Autonomy vs. Centralization."""
+# --- 1. SOVEREIGNTY SCORE (HUMANITY-ALIGNED AUDIT) ---
+def get_sovereignty_score(name, office, candidate_info=None):
     score = 100
-    # Penalty keywords for Globalist/Project Z alignment
-    red_flags = ['BlackRock', 'Vanguard', 'WHO', 'Genomic', 'Consortium', 'Swiss Vault']
+    flags = []
+    is_judge = 'judge' in office.lower() or 'court' in office.lower()
     
-    # Placeholder for FEC donor check logic
-    # In a live app, this would iterate through contributor_name in FEC API results
-    has_globalist_funding = False # Logic: If match in red_flags, deduct 25
+    # Objective criteria keywords
+    globalist_keywords = ['sustainable development goals', 'sdg', 'international health regulations', 'ihr', 
+                          'digital health id', 'biometric tracking', 'great reset', 'who', 'un agenda 2030']
+    funding_red_flags = ['blackrock', 'vanguard', 'who', 'gates foundation', 'rockefeller', 'open society', 
+                         'consortium', 'swiss vault', 'biometric']
+    positive_actions = ['defund who', 'oppose great reset', 'america first pledge', 'reject sdg']
     
-    return score - 25 if has_globalist_funding else score
+    # Funding Trail
+    has_globalist_funding = check_globalist_funding(name, candidate_info)
+    if has_globalist_funding:
+        score -= 25
+        flags.append({'type': 'red', 'text': 'Funded by 2030-aligned PACs or global philanthropies'})
+    
+    # Institutional Ties
+    has_institutional_ties = check_institutional_ties(name)
+    if has_institutional_ties:
+        score -= 25
+        flags.append({'type': 'red', 'text': 'Ties to WEF, CFR, or similar networks'})
+    
+    # Legislative Record (for non-judges)
+    if not is_judge:
+        has_bad_legislative_record = check_legislative_record(name, globalist_keywords)
+        if has_bad_legislative_record:
+            score -= 25
+            flags.append({'type': 'red', 'text': 'Sponsored/voted for bills aligned with IHR/SDGs'})
+    
+    # Judicial Precedent (for judges)
+    if is_judge:
+        has_bad_judicial_record = check_judicial_precedent(name, globalist_keywords)
+        if has_bad_judicial_record:
+            score -= 25
+            flags.append({'type': 'red', 'text': 'Ruled in favor of mandates or international overreach'})
+    
+    # Positive actions (green flags)
+    has_positive_actions = check_positive_actions(name, positive_actions)
+    if has_positive_actions:
+        flags.append({'type': 'green', 'text': 'Actions against 2030, e.g., defund WHO'})
+        # No score boost to keep max 100, but highlight as green
+    
+    # Clamp score
+    score = max(0, min(100, score))
+    
+    # Category
+    if score >= 90:
+        category = 'Sovereign'
+    elif score <= 30:
+        category = 'Globalist'
+    else:
+        category = 'Mixed'
+    
+    # Money Smoke Screen Alert (simple version: if claims 'America First' but has red flags)
+    smoke_screen = None
+    if check_america_first_claims(name) and (has_globalist_funding or has_institutional_ties):
+        smoke_screen = 'Infiltrator: Claims "America First" but funded/tied to globalist entities'
+        flags.append({'type': 'red', 'text': smoke_screen})
+    
+    return score, category, flags, smoke_screen
 
-# --- 2. FORENSIC JUDICIAL AUDIT ---
+# Helper functions for checks (placeholders with real API/scraping where possible)
+def check_globalist_funding(name, candidate_info):
+    candidate_id = candidate_info.get('candidateId') if candidate_info else None
+    if not candidate_id:
+        # Search FEC for candidate
+        fec_search_url = f"https://api.open.fec.gov/v1/candidates/search/?api_key={FEC_API_KEY}&name={urllib.parse.quote(name)}"
+        try:
+            data = requests.get(fec_search_url).json()
+            if data.get('results'):
+                cand = data['results'][0]
+                if cand.get('principal_committees'):
+                    candidate_id = cand['principal_committees'][0]['committee_id']
+        except:
+            return False
+    
+    if candidate_id:
+        url = f"https://api.open.fec.gov/v1/schedules/schedule_a/?api_key={FEC_API_KEY}&committee_id={candidate_id}&per_page=100"
+        try:
+            data = requests.get(url).json()
+            contributions = data.get('results', [])
+            funding_red_flags = ['blackrock', 'vanguard', 'who', 'gates', 'rockefeller', 'open society']
+            for contrib in contributions:
+                contributor_name = contrib.get('contributor_name', '').lower()
+                if any(flag in contributor_name for flag in funding_red_flags):
+                    return True
+        except:
+            pass
+    return False
+
+def check_institutional_ties(name):
+    # WEF check (rough scrape)
+    url = f"https://www.weforum.org/search?query={urllib.parse.quote(name)}&tab=people"
+    try:
+        response = requests.get(url)
+        if 'Young Global Leader' in response.text or 'WEF Member' in response.text:
+            return True
+    except:
+        pass
+    
+    # CFR roster check
+    url = "https://www.cfr.org/membership/roster"
+    try:
+        response = requests.get(url)
+        if name in response.text:
+            return True
+    except:
+        pass
+    
+    # Add '14 Scientists' if defined (user-specific, placeholder)
+    return False
+
+def check_legislative_record(name, keywords):
+    # Search Congress.gov for sponsored bills
+    query = urllib.parse.quote(f'sponsor:"{name}"')
+    url = f"https://www.congress.gov/search?q={{%22source%22:%22legislation%22,%22search%22:%22{query}%22}}&searchResultViewType=expanded"
+    try:
+        response = requests.get(url)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        bills = soup.find_all('span', class_='result-title')
+        for bill in bills:
+            if any(k.lower() in bill.text.lower() for k in keywords):
+                return True
+    except:
+        pass
+    return False
+
+def check_judicial_precedent(name, keywords):
+    # Use CourtListener API to search opinions by author
+    if not COURT_LISTENER_API_KEY:
+        return False  # Skip if no key
+    url = f"https://www.courtlistener.com/api/rest/v3/search/?q=author:{urllib.parse.quote(name)}&type=o"
+    headers = {'Authorization': f'Token {COURT_LISTENER_API_KEY}'}
+    try:
+        response = requests.get(url, headers=headers)
+        data = response.json()
+        results = data.get('results', [])
+        for result in results:
+            text = result.get('plain_text', '').lower() or result.get('html', '').lower()
+            if any(k.lower() in text for k in keywords) and ('upheld' in text or 'in favor' in text):
+                return True  # Rough detection of pro-mandate ruling
+    except:
+        pass
+    return False
+
+def check_positive_actions(name, positive_keywords):
+    # Web search for positive pledges (placeholder, could use web_search tool but in app use requests)
+    url = f"https://www.google.com/search?q={urllib.parse.quote(name + ' ' + ' '.join(positive_keywords))}"
+    try:
+        response = requests.get(url)  # Note: Google scraping may violate TOS; use API in production
+        if any(k in response.text.lower() for k in positive_keywords):
+            return True
+    except:
+        pass
+    return False
+
+def check_america_first_claims(name):
+    # Simple check for public claims (e.g., via web search; in production, use YouTube/X API)
+    url = f"https://www.google.com/search?q={urllib.parse.quote(name + ' america first')}"
+    try:
+        response = requests.get(url)
+        if 'america first' in response.text.lower():
+            return True
+    except:
+        pass
+    return False
+
+# --- 2. FORENSIC AUDIT LINK ---
 def audit_record(name, office):
-    """Checks for patterns of 'Backbone' vs. 'Weakness'."""
-    if "Judge" in office:
-        return f"https://www.courtlistener.com/?q={name.replace(' ', '+')}" # Judicial Evidence
-    return f"https://archive.org/search.php?query={name.replace(' ', '+')}+hearings" # Political Evidence
+    quoted_name = urllib.parse.quote(f'"{name}"')
+    if 'judge' in office.lower():
+        return f"https://www.courtlistener.com/?q={quoted_name}&type=o&order_by=dateFiled+desc"
+    return f"https://archive.org/search?query={quoted_name}+hearings+AND+date:[2000-01-01+TO+*]"
 
-# --- 3. GIFTGRAM BILLING MODULE ---
-@app.route('/giftgram/calculate', methods=['POST'])
-def giftgram_logic():
-    data = request.json
-    amount = float(data.get('amount', 0))
-    friends = int(data.get('friends', 1))
+# --- 3. GET CANDIDATE PHOTO (Prioritize Ballotpedia, then Wikipedia, then DuckDuckGo) ---
+def get_photo(name):
+    # Try Ballotpedia first for political candidates
+    try:
+        bp_name = urllib.parse.quote(name.replace(' ', '_'))
+        bp_url = f"https://ballotpedia.org/{bp_name}"
+        bp_response = requests.get(bp_url)
+        if bp_response.status_code == 200:
+            bp_soup = BeautifulSoup(bp_response.text, 'html.parser')
+            img = bp_soup.select_one('.widget-infobox img.widget-img')
+            if img and img.get('src'):
+                src = img['src']
+                if src.startswith('//'):
+                    src = 'https:' + src
+                return src
+    except:
+        pass
     
-    fee = amount * 0.02  # Your specific 2% fee
-    total = amount + fee
-    return jsonify({"per_person": round(total/friends, 2), "fee": round(fee, 2)})
+    # Fallback to Wikipedia API
+    try:
+        wiki_name = urllib.parse.quote(name.replace(' ', '_'))
+        wiki_url = f"https://en.wikipedia.org/w/api.php?action=query&format=json&prop=pageimages&titles={wiki_name}&pithumbsize=150&redirects=1"
+        wiki_data = requests.get(wiki_url).json()
+        pages = wiki_data.get('query', {}).get('pages', {})
+        for page_id in pages:
+            if 'thumbnail' in pages[page_id]:
+                return pages[page_id]['thumbnail']['source']
+    except:
+        pass
+    
+    # Fallback to DuckDuckGo Instant Answer API
+    try:
+        ddg_url = "https://api.duckduckgo.com"
+        params = {'q': name + ' official photo', 'format': 'json'}
+        ddg_data = requests.get(ddg_url, params=params).json()
+        image = ddg_data.get('Image')
+        if image:
+            return image
+    except:
+        pass
+    
+    # Ultimate fallback
+    return 'https://via.placeholder.com/150'
 
-# --- 4. UNIVERSAL SEARCH HUB ---
+# --- 4. GET REAL-TIME ELECTION DATA (POLLS VIA NEWS) ---
+def get_real_time_data(office, state):
+    if not NEWS_API_KEY:
+        return []
+    query = f"{office} {state} election poll"
+    url = f"https://newsapi.org/v2/everything?q={urllib.parse.quote(query)}&sortBy=publishedAt&apiKey={NEWS_API_KEY}&pageSize=3"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        data = response.json()
+        articles = data.get('articles', [])
+        return [{'title': a['title'], 'url': a['url']} for a in articles]
+    except:
+        return []
+
+# --- 5. UNIVERSAL SEARCH HUB (USING VOTERINFO FOR UPCOMING ELECTIONS) ---
 @app.route('/', methods=['GET', 'POST'])
 def home():
-    results = []
+    contests_data = {}
+    error = None
+    state = 'US'
     if request.method == 'POST':
-        address = request.form.get('address')
-        # Google Civic API: Works for ALL 50 States & Districts
-        url = f"https://www.googleapis.com/civicinfo/v2/representatives?address={address}&key={GOOGLE_API_KEY}"
-        data = requests.get(url).json()
-        
-        for office in data.get('offices', []):
-            for idx in office.get('officialIndices', []):
-                official = data['officials'][idx]
-                name = official.get('name')
-                
-                results.append({
-                    "name": name,
-                    "office": office.get('name'),
-                    "photo": official.get('photoUrl', 'https://via.placeholder.com/150'),
-                    "score": get_trust_rating(name, ""),
-                    "evidence": audit_record(name, office.get('name'))
-                })
-    return render_template('index.html', candidates=results)
+        address = request.form.get('address', '').strip()
+        if not address:
+            error = "Please enter a valid address."
+        else:
+            try:
+                url = f"https://www.googleapis.com/civicinfo/v2/voterinfo?address={urllib.parse.quote(address)}&key={GOOGLE_API_KEY}"
+                response = requests.get(url)
+                response.raise_for_status()
+                data = response.json()
+                state_info = data.get('state', [{}])[0]
+                state = state_info.get('name', 'US')
+                contests = data.get('contests', [])
+                for contest in contests:
+                    office = contest.get('office', 'Unknown Office')
+                    candidates = contest.get('candidates', [])
+                    contest_candidates = []
+                    for cand in candidates:
+                        name = cand.get('name')
+                        party = cand.get('party', 'Unknown')
+                        candidate_info = cand  # Pass full info
+                        photo = get_photo(name)
+                        score, category, flags, smoke_screen = get_sovereignty_score(name, office, candidate_info)
+                        evidence = audit_record(name, office)
+                        is_judge_retention = 'judge' in office.lower() and len(candidates) == 1
+                        recommendation = 'Vote YES' if score >= 90 else 'Vote NO' if score <= 30 else 'Consider Carefully'
+                        if is_judge_retention:
+                            recommendation = f"{recommendation} (Retention Vote)"
+                        contest_candidates.append({
+                            "name": name,
+                            "party": party,
+                            "photo": photo,
+                            "score": score,
+                            "category": category,
+                            "flags": flags,
+                            "smoke_screen": smoke_screen,
+                            "evidence": evidence,
+                            "recommendation": recommendation
+                        })
+                    # Find best candidate
+                    if contest_candidates:
+                        best_cand = max(contest_candidates, key=lambda c: c['score'])
+                        best_cand['is_best'] = True
+                    real_time = get_real_time_data(office, state)
+                    contests_data[office] = {
+                        "candidates": contest_candidates,
+                        "real_time": real_time
+                    }
+            except requests.RequestException as e:
+                error = f"API error: {str(e)}"
+            except ValueError:
+                error = "Invalid response from API."
+    return render_template('index.html', contests=contests_data, error=error)
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=False, host='0.0.0.0')
